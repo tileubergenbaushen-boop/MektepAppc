@@ -791,7 +791,7 @@ MODERN_FUNCTIONS = {
 }
 NUMBER_FORMATS = {"integer": "#,##0", "number": "#,##0.00", "money": "#,##0.00", "percent": "0.0%"}
 TOTAL_ROW = re.compile(r"^\s*(итого|итог|всего|total|subtotal|барлығы|жиыны|жалпы)", re.I)
-_NUM_JUNK = re.compile(r"[\s   ']|₸|₽|€|\$|(?i:тг\.?|тенге|руб\.?|kzt|usd|eur|rub)")
+_NUM_JUNK = re.compile(r"[\s']|₸|₽|€|\$|(?i:тг\.?|тенге|руб\.?|kzt|usd|eur|rub)")
 _NUMBER = re.compile(r"[-+]?[\d.,]*\d[\d.,]*(?:[eE][-+]?\d+)?")
 
 THIN = Side(style="thin", color="D9DCE6")
