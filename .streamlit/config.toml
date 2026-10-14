@@ -1,0 +1,29 @@
+# Тёмная тема MektepApp AI (дополняет CSS из app.py)
+[theme]
+base = "dark"
+primaryColor = "#8B5CF6"
+backgroundColor = "#0B0D12"
+secondaryBackgroundColor = "#181D29"
+textColor = "#E8EAF0"
+linkColor = "#A78BFA"
+borderColor = "#262B38"
+baseRadius = "0.75rem"
+buttonRadius = "0.75rem"
+font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap, sans-serif"
+codeFont = "JetBrains Mono:https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap, monospace"
+codeBackgroundColor = "#141824"
+dataframeHeaderBackgroundColor = "#181D29"
+
+[theme.sidebar]
+backgroundColor = "#0F121A"
+secondaryBackgroundColor = "#181D29"
+borderColor = "#262B38"
+
+[client]
+toolbarMode = "minimal"
+
+[browser]
+gatherUsageStats = false
+
+[server]
+maxUploadSize = 20
