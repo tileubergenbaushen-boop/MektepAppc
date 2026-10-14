@@ -63,9 +63,11 @@ ENV_PATH = APP_DIR / ".env"
 load_dotenv(ENV_PATH)
 load_dotenv(Path.cwd() / ".env")
 
-DEFAULT_MODEL = os.getenv("GEMINI_MODEL", "").strip() or "gemini-2.5-flash"
+# Псевдоним Google, который всегда указывает на актуальную модель Flash.
+FALLBACK_MODEL = "gemini-flash-latest"
+DEFAULT_MODEL = os.getenv("GEMINI_MODEL", "").strip() or FALLBACK_MODEL
 MODEL_OPTIONS = list(
-    dict.fromkeys([DEFAULT_MODEL, "gemini-2.5-flash", "gemini-flash-latest", "gemini-2.5-flash-lite"])
+    dict.fromkeys([DEFAULT_MODEL, FALLBACK_MODEL, "gemini-flash-lite-latest", "gemini-2.5-flash"])
 )
 API_KEY_URL = "https://aistudio.google.com/apikey"
 
@@ -412,6 +414,12 @@ def thinking_config(model: str, deep: bool) -> types.ThinkingConfig | None:
     return None
 
 
+def tuned_temperature(model: str, value: float) -> float | None:
+    # Для Gemini 3 и новее Google советует не менять температуру (по умолчанию 1.0):
+    # низкие значения ухудшают рассуждения. Свои значения задаём только моделям 2.x.
+    return value if model.startswith("gemini-2") else None
+
+
 def finish_name(response: types.GenerateContentResponse) -> str:
     if not response.candidates or response.candidates[0].finish_reason is None:
         return ""
@@ -442,7 +450,7 @@ def generate_json(ctx: Ctx, contents: list, *, system: str, schema: type[BaseMod
     """Ответ строго по JSON-схеме. Идёт потоком: виден прогресс, а долгая генерация не упирается в тайм-аут."""
     config = types.GenerateContentConfig(
         system_instruction=system,
-        temperature=temperature,
+        temperature=tuned_temperature(ctx.model, temperature),
         response_mime_type="application/json",
         response_schema=schema,
         thinking_config=thinking_config(ctx.model, ctx.deep),
@@ -466,7 +474,7 @@ def stream_text(ctx: Ctx, contents: list, *, system: str, temperature: float = 0
     """Потоковый текстовый ответ Gemini (для чатов)."""
     config = types.GenerateContentConfig(
         system_instruction=system,
-        temperature=temperature,
+        temperature=tuned_temperature(ctx.model, temperature),
         thinking_config=thinking_config(ctx.model, ctx.deep),
     )
     try:
@@ -1501,19 +1509,38 @@ def connection_html(state: str, title: str, subtitle: str) -> str:
             f'<div class="mk-conn-title">{esc(title)}</div><div class="mk-conn-sub">{esc(subtitle)}</div></div></div>')
 
 
+def _fingerprint(api_key: str, model: str) -> str:
+    return hashlib.sha256(f"{api_key}|{model}".encode()).hexdigest()
+
+
 def check_connection(api_key: str, model: str, slot) -> dict:
-    """Проверяет ключ и модель (без расхода токенов). Результат кешируется в сессии."""
-    fingerprint = hashlib.sha256(f"{api_key}|{model}".encode()).hexdigest()
+    """Проверяет ключ и модель (без расхода токенов); результат кешируется в сессии.
+
+    Если модель снята с поддержки (404), приложение само переключается на FALLBACK_MODEL.
+    """
     check = st.session_state.get("conn")
-    if check and check["fp"] == fingerprint:
+    if check and check["fp"] == _fingerprint(api_key, model):
         return check
     slot.html(connection_html("warn", "Проверяю подключение…", model))
-    try:
-        info = get_client(api_key).models.get(
-            model=model, config=types.GetModelConfig(http_options=types.HttpOptions(timeout=20_000)))
-        check = {"fp": fingerprint, "ok": True, "title": "Gemini подключён", "detail": info.display_name or model}
-    except Exception as exc:
-        check = {"fp": fingerprint, "ok": False, "title": "Ошибка подключения", "detail": describe_error(exc, model)}
+    check, error = None, None
+    for candidate in dict.fromkeys([model, FALLBACK_MODEL]):
+        try:
+            info = get_client(api_key).models.get(
+                model=candidate, config=types.GetModelConfig(http_options=types.HttpOptions(timeout=20_000)))
+        except Exception as exc:
+            error = error or exc
+            if isinstance(exc, genai_errors.APIError) and exc.code == 404:
+                continue  # модель недоступна — пробуем запасную
+            break
+        if candidate != model:
+            st.session_state.model = candidate  # виджет выбора модели ещё не создан в этом запуске
+            st.toast(f"Модель {model} недоступна, включена {candidate}", icon="🔄")
+        check = {"fp": _fingerprint(api_key, candidate), "ok": True, "model": candidate,
+                 "title": "Gemini подключён", "detail": info.display_name or candidate}
+        break
+    if check is None:
+        check = {"fp": _fingerprint(api_key, model), "ok": False, "model": model,
+                 "title": "Ошибка подключения", "detail": describe_error(error, model)}
     st.session_state.conn = check
     return check
 
@@ -1549,13 +1576,15 @@ def render_sidebar() -> tuple[str, Ctx]:
             slot.html(connection_html("warn", "Нужен API-ключ", "Укажите GEMINI_API_KEY в .env или ниже"))
         else:
             check = check_connection(api_key, model, slot)
+            model = check.get("model", model)
             slot.html(connection_html("ok" if check["ok"] else "err", check["title"], check["detail"]))
 
         with st.expander("API-ключ и модель", icon=":material/key:", expanded=not (check and check["ok"])):
             st.text_input("GEMINI_API_KEY", key="api_key", type="password", placeholder="AIza…",
                           help="По умолчанию ключ читается из файла .env рядом с app.py.")
             st.selectbox("Модель Gemini", MODEL_OPTIONS, key="model", accept_new_options=True,
-                         help="По умолчанию gemini-2.5-flash. Можно ввести название другой модели.")
+                         help="По умолчанию gemini-flash-latest — всегда актуальная модель Flash. "
+                              "Можно ввести название другой модели.")
             st.button("Проверить ключ", icon=":material/sync:", width="stretch", disabled=not api_key,
                       on_click=drop_state, args=("conn",))
             st.button("Сохранить в .env", icon=":material/save:", width="stretch", disabled=not api_key,
