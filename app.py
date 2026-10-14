@@ -1545,7 +1545,18 @@ def check_connection(api_key: str, model: str, slot) -> dict:
     return check
 
 
+def is_local_owner() -> bool:
+    """Приложение открыто на этом же компьютере (не друзьями по сети и не в облаке)."""
+    try:
+        has_secrets = st.secrets.load_if_toml_exists()
+    except Exception:
+        has_secrets = True
+    return st.context.ip_address is None and not has_secrets
+
+
 def save_env() -> None:
+    if not is_local_owner():
+        return
     api_key = st.session_state.get("api_key", "").strip()
     model = (st.session_state.get("model") or DEFAULT_MODEL).strip()
     try:
@@ -1568,7 +1579,10 @@ def render_sidebar() -> tuple[str, Ctx]:
         )
 
         st.html('<div class="mk-label">Подключение</div>')
-        api_key = st.session_state.get("api_key", "").strip()
+        # Общий ключ (.env или Secrets сервера) никогда не попадает в поле ввода — его не увидят гости.
+        shared_key = os.getenv("GEMINI_API_KEY", "").strip()
+        own_key = st.session_state.get("api_key", "").strip()
+        api_key = own_key or shared_key
         model = (st.session_state.get("model") or DEFAULT_MODEL).strip()
         slot = st.empty()
         if not api_key:
@@ -1580,15 +1594,18 @@ def render_sidebar() -> tuple[str, Ctx]:
             slot.html(connection_html("ok" if check["ok"] else "err", check["title"], check["detail"]))
 
         with st.expander("API-ключ и модель", icon=":material/key:", expanded=not (check and check["ok"])):
-            st.text_input("GEMINI_API_KEY", key="api_key", type="password", placeholder="AIza…",
-                          help="По умолчанию ключ читается из файла .env рядом с app.py.")
+            st.text_input("GEMINI_API_KEY", key="api_key", type="password",
+                          placeholder="Ключ уже задан — можно ввести свой" if shared_key else "AIza…",
+                          help="Общий ключ берётся из файла .env (или Secrets на сервере) и здесь не показывается. "
+                               "Свой ключ действует только в вашей вкладке.")
             st.selectbox("Модель Gemini", MODEL_OPTIONS, key="model", accept_new_options=True,
                          help="По умолчанию gemini-flash-latest — всегда актуальная модель Flash. "
                               "Можно ввести название другой модели.")
             st.button("Проверить ключ", icon=":material/sync:", width="stretch", disabled=not api_key,
                       on_click=drop_state, args=("conn",))
-            st.button("Сохранить в .env", icon=":material/save:", width="stretch", disabled=not api_key,
-                      on_click=save_env, help="Записать ключ и модель в файл .env рядом с app.py")
+            if is_local_owner():
+                st.button("Сохранить в .env", icon=":material/save:", width="stretch", disabled=not own_key,
+                          on_click=save_env, help="Записать введённый ключ и модель в файл .env рядом с app.py")
             st.html(f'<a class="mk-link" href="{API_KEY_URL}" target="_blank">Получить бесплатный ключ →</a>')
 
         st.html('<div class="mk-label">Режим работы</div>')
@@ -1916,8 +1933,7 @@ STATE_DEFAULTS = {
 
 
 def init_state() -> None:
-    if "api_key" not in st.session_state:
-        st.session_state.api_key = os.getenv("GEMINI_API_KEY", "").strip()
+    st.session_state.setdefault("api_key", "")
     for key, value in STATE_DEFAULTS.items():
         # Повторное присваивание сохраняет значения виджетов скрытых режимов между переключениями.
         st.session_state[key] = st.session_state.get(key, value)
