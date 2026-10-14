@@ -27,3 +27,4 @@ gatherUsageStats = false
 
 [server]
 maxUploadSize = 20
+showEmailPrompt = false
